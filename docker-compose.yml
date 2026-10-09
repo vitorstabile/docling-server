@@ -6,11 +6,18 @@ services:
     container_name: docling-server
     ports:
       - "5001:5001"
+    volumes:
+      # Map the volume directly to the container's default cache directory
+      # This captures HuggingFace, PyTorch, and Docling models all at once!
+      - docling_cache:/opt/app-root/src/.cache
     environment:
-      # Enable the web UI
       - DOCLING_SERVE_ENABLE_UI=1
-      # Use the Local in-process engine for conversion
-      - DOCLING_SERVE_ENG_KIND=local
-      # Number of workers (tune based on your CPU cores)
       - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
+
+      # (Leave these commented out until AFTER the first PDF converts)
+      # - HF_HUB_OFFLINE=1
+      # - HF_DATASETS_OFFLINE=1
     restart: unless-stopped
+
+volumes:
+  docling_cache:
