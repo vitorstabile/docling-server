@@ -1,0 +1,16 @@
+services:
+  docling:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: docling-server
+    ports:
+      - "5001:5001"
+    environment:
+      # Enable the web UI
+      - DOCLING_SERVE_ENABLE_UI=1
+      # Use the Local in-process engine for conversion
+      - DOCLING_SERVE_ENG_KIND=local
+      # Number of workers (tune based on your CPU cores)
+      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
+    restart: unless-stopped
