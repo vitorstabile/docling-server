@@ -1,93 +1,103 @@
 # Docling Conversion Server
 
-This project runs a self-hosted [Docling](https://github.com/docling-project/docling) conversion service using Docker. It exposes a REST API that processes documents (like PDFs) and converts them into Markdown, JSON, or HTML.
+This project runs a self-hosted [Docling](https://github.com/docling-project/docling) conversion service using Docker. It exposes a REST API that processes documents (like PDFs) and converts them into Markdown, JSON, or HTML. 
+
+By using a Docker Named Volume, all AI models (Layout, Table Recognition, and OCR) are downloaded safely into Docker's persistent storage on the first run. After that, the server can run **100% offline (air-gapped)**.
 
 ## Prerequisites
 * [Docker](https://docs.docker.com/get-docker/) installed.
-* Python 3.9+ (if using the provided Python scripts).
+* Python 3.9+ (if using the provided Python client script).
 
-## 1. Setup & Configuration
+---
 
-This setup uses the official `docling-serve` image.
+## 1. Directory Structure
 
-### Directory Structure
-Ensure your files are laid out like this before running:
+Ensure your project folder contains the following files:
 ```text
 .
 ├── docker-compose.yml
 ├── requirements.txt
 ├── README.md
-├── sample.pdf        (Bring your own PDF for testing)
-├── convert_api.py    (Python script provided below)
+├── sample.pdf          (Bring your own PDF for testing)
+├── convert_api.py      (Python script provided below)
 └── deploy/
-    └── Dockerfile    (Your custom Dockerfile)
+    └── Dockerfile      (Your custom Dockerfile)
 
 ```
 
-### Starting the Server
+*(Note: You do not need to create a local models folder. Docker manages the storage automatically via a named volume).*
 
-Start the container in detached mode:
+---
+
+## 2. Setup & True Offline Configuration
+
+### Step 2a: First Run (Download Models)
+
+Ensure the offline flags in your `docker-compose.yml` are **commented out** so the container can connect to the internet to download the models (approx. 2-4 GB).
+
+Start the container:
 
 ```bash
 docker compose up -d
 
 ```
 
-The server will bind to `localhost:5001`. *Note: On the first boot, the container may take a few moments to download required OCR models.*
+**Trigger the download:** The server waits for the first request before downloading. Run the Python script or the `curl` command (see Section 4) to send a PDF. You can monitor the download progress by running:
 
-### Configuration Options
+```bash
+docker compose logs -f docling
 
-You can configure the server by modifying the environment variables in `docker-compose.yml`:
+```
 
-* `DOCLING_SERVE_ENABLE_UI=1` : Enables the web UI playground at `/ui`.
-* `DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2` : The number of concurrent background workers (tune this to match your CPU cores).
+Once you see `Finished converting document` in the logs, the models are permanently saved in the Docker volume.
+
+### Step 2b: Lock it Down (100% Offline Mode)
+
+Once the models are successfully cached:
+
+1. Stop the container: `docker compose down`
+2. Open your `docker-compose.yml` and **uncomment** the Hugging Face offline variables:
+
+```yaml
+      - HF_HUB_OFFLINE=1
+      - HF_DATASETS_OFFLINE=1
+
+```
+
+3. Start the container again: `docker compose up -d`
+
+The server will now start instantly, use the locally cached models, and **never attempt to use the internet again**.
 
 ---
 
-## 2. Usage & Endpoints
+## 3. Usage & Endpoints
 
-Once the container is running, the service is accessible at `http://localhost:5001`.
+Once running, the service is accessible at `http://localhost:5001`.
 
 * **Web UI Playground:** `http://localhost:5001/ui`
-* **Swagger API Docs:** `http://localhost:5001/docs` (Use this to test endpoints visually)
+* **Swagger API Docs:** `http://localhost:5001/docs` (Test endpoints visually)
 
-### Converting a file via cURL (Multipart Upload)
+### Converting via cURL (Multipart Upload)
 
-You can directly send a file to the `/v1/convert/file` endpoint using `curl`:
-
-```bash
-curl -F "files=@sample.pdf" http://localhost:5001/v1/convert/file > output.json
-
-```
-
-### Converting a remote file via URL
-
-To convert a document directly from a public URL:
+Send a local file directly to the API:
 
 ```bash
-curl -X 'POST' \
-  'http://localhost:5001/v1/convert/source' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: application/json' \
-  -d '{ "sources": [{"kind": "http", "url": "[https://arxiv.org/pdf/2501.17887](https://arxiv.org/pdf/2501.17887)"}] }'
+curl -F "files=@sample.pdf" http://localhost:5001/v1/convert/file > output.md
 
 ```
 
 ---
 
-## 3. Python Client Example
+## 4. Python Client Example
 
-It is best practice to run Python scripts inside a virtual environment to avoid conflicting packages.
+It is best practice to run Python scripts inside a virtual environment to avoid package conflicts.
 
-### Step 3a: Create and Activate a Virtual Environment
+### Step 4a: Create and Activate a Virtual Environment
 
 **On Linux / macOS:**
 
 ```bash
-# Create the virtual environment
 python3 -m venv .venv
-
-# Activate the virtual environment
 source .venv/bin/activate
 
 ```
@@ -95,28 +105,23 @@ source .venv/bin/activate
 **On Windows:**
 
 ```cmd
-# Create the virtual environment
 python -m venv .venv
-
-# Activate the virtual environment
 .venv\Scripts\activate
 
 ```
 
-*(Note: If you are using PowerShell and get an execution policy error, run `Set-ExecutionPolicy Unrestricted -Scope CurrentUser` first).*
+### Step 4b: Install Dependencies
 
-### Step 3b: Install Dependencies
-
-With your `.venv` activated, install the required packages:
+Create a `requirements.txt` file containing `requests==2.31.0`, then run:
 
 ```bash
 pip install -r requirements.txt
 
 ```
 
-### Step 3c: Run the Script
+### Step 4c: Run the Script
 
-Create a file named `convert_api.py` to send a local PDF to your Docker container and extract the Markdown:
+Create `convert_api.py`:
 
 ```python
 import requests
@@ -153,8 +158,7 @@ def convert_pdf_to_md_via_api(pdf_path, output_md_path):
             
         print(f"Success! Markdown saved to {output_md_path}")
     else:
-        print(f"Error: {response.status_code}")
-        print(response.text)
+        print(f"Error {response.status_code}: {response.text}")
 
 if __name__ == "__main__":
     # Ensure you have a 'sample.pdf' in the same directory
@@ -169,11 +173,16 @@ python convert_api.py
 
 ```
 
-## 4. Stopping the Server
+---
 
-When you are done, shut down the container using:
+## 5. Docker Volume Management
 
+Because the AI models are stored inside a Docker Named Volume, they persist even if you delete the container.
+
+* **View the volume:** `docker volume ls` (Look for `docling_cache`)
+* **Delete everything (Container + Models):**
+If you ever want to completely wipe the installation and free up the disk space, run:
 ```bash
-docker compose down
+docker compose down -v
 
 ```
