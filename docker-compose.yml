@@ -1,23 +1,42 @@
-services:
-  docling:
-    build:
-      context: .
-      dockerfile: deploy/Dockerfile
-    container_name: docling-server
-    ports:
-      - "5001:5001"
-    volumes:
-      # Map the volume directly to the container's default cache directory
-      # This captures HuggingFace, PyTorch, and Docling models all at once!
-      - docling_cache:/opt/app-root/src/.cache
-    environment:
-      - DOCLING_SERVE_ENABLE_UI=1
-      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
+# Start with:  docker compose --profile cpu up -d     (no GPU)
+#              docker compose --profile gpu up -d     (NVIDIA GPU)
+# Copy .env.example to .env first.
 
-      # (Leave these commented out until AFTER the first PDF converts)
-      # - HF_HUB_OFFLINE=1
-      # - HF_DATASETS_OFFLINE=1
-    restart: unless-stopped
+x-docling: &docling
+  ports:
+    - "127.0.0.1:5001:5001"   # local only; remove "127.0.0.1:" to expose on the network
+  environment:
+    - DOCLING_SERVE_API_KEY=${DOCLING_API_KEY}
+    - DOCLING_SERVE_ENABLE_UI=${DOCLING_ENABLE_UI:-0}
+    - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=${DOCLING_WORKERS:-2}
+  volumes:
+    - docling_cache:/opt/app-root/src/.cache   # models are kept here between restarts
+  mem_limit: ${DOCLING_MEM_LIMIT:-8g}
+  healthcheck:
+    test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:5001/health')"]
+    interval: 30s
+    timeout: 5s
+    retries: 5
+    start_period: 120s
+  restart: unless-stopped
+
+services:
+  docling-cpu:
+    <<: *docling
+    profiles: ["cpu"]
+    image: quay.io/docling-project/docling-serve-cpu:${DOCLING_VERSION:?set DOCLING_VERSION in .env}
+
+  docling-gpu:
+    <<: *docling
+    profiles: ["gpu"]
+    image: quay.io/docling-project/docling-serve-cu128:${DOCLING_VERSION:?set DOCLING_VERSION in .env}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
 volumes:
   docling_cache:
